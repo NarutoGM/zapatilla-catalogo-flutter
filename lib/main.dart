@@ -8,7 +8,9 @@ import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/controllers/auth_controller.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
+import 'features/home/presentation/screens/cart_screen.dart';
 import 'features/home/presentation/screens/home_screen.dart';
+import 'services/cart_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +23,6 @@ Future<void> main() async {
   runApp(const PizzoApp());
 }
 
-
 class PizzoApp extends StatelessWidget {
   const PizzoApp({super.key});
 
@@ -30,6 +31,7 @@ class PizzoApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthController()),
+        ChangeNotifierProvider(create: (_) => CartService()),
       ],
       child: MaterialApp(
         title: 'Pizzo Velocity - Catálogo 3D',
@@ -39,6 +41,7 @@ class PizzoApp extends StatelessWidget {
         routes: {
           '/login': (context) => const LoginScreen(),
           '/home': (context) => const HomeScreen(),
+          '/cart': (context) => const CartScreen(),
         },
       ),
     );
