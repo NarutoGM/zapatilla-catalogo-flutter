@@ -3,21 +3,31 @@ import '../../../../core/constants/app_colors.dart';
 
 class AdminDialog extends StatelessWidget {
   final VoidCallback onDismiss;
+  final VoidCallback? onOpenAdminPanel;
 
   const AdminDialog({
     super.key,
     required this.onDismiss,
+    this.onOpenAdminPanel,
   });
 
-  static Future<void> show(BuildContext context, {required VoidCallback onDismiss}) {
+  static Future<void> show(
+    BuildContext context, {
+    required VoidCallback onDismiss,
+  }) {
     return showDialog<void>(
       context: context,
-      barrierDismissible: false, // Modal bloqueante
+      barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return AdminDialog(
           onDismiss: () {
             Navigator.of(dialogContext).pop();
             onDismiss();
+          },
+          onOpenAdminPanel: () {
+            Navigator.of(dialogContext).pop();
+            onDismiss();
+            Navigator.of(context).pushReplacementNamed('/admin');
           },
         );
       },
@@ -37,24 +47,21 @@ class AdminDialog extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Icono de Escudo de Advertencia / Seguridad
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppColors.warning.withOpacity(0.12),
+                color: AppColors.primaryLight.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
-                Icons.shield_outlined,
-                color: AppColors.warning,
+                Icons.admin_panel_settings_rounded,
+                color: AppColors.primaryLight,
                 size: 40,
               ),
             ),
             const SizedBox(height: 18),
-
-            // Título
             const Text(
-              'Acceso Restringido',
+              'Modo Administrador Detectado',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 20,
@@ -63,10 +70,8 @@ class AdminDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-
-            // Mensaje explicativo
             const Text(
-              'La administración del catálogo y la subida de modelos .glb debe realizarse exclusivamente desde la versión web (/admin). Esta aplicación móvil está habilitada únicamente para clientes.',
+              'Desde el panel /admin puedes subir modelos 3D (.glb), fotos de zapatillas y gestionar precios o stock directamente en Firebase.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -75,26 +80,48 @@ class AdminDialog extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 24),
-
-            // Botón de acción: "Entendido"
+            if (onOpenAdminPanel != null) ...[
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  onPressed: onOpenAdminPanel,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryLight,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.dashboard_customize_rounded, size: 18),
+                  label: const Text(
+                    'Entrar al Panel Admin (/admin)',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             SizedBox(
               width: double.infinity,
-              height: 48,
-              child: ElevatedButton(
+              height: 44,
+              child: OutlinedButton(
                 onPressed: onDismiss,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  elevation: 0,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: const Text(
-                  'Entendido',
+                  'Volver al Login de Cliente',
                   style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
