@@ -6,6 +6,7 @@ import '../../../../services/api_service.dart';
 import '../../../../widgets/file_picker_helper_stub.dart'
     if (dart.library.js_interop) '../../../../widgets/file_picker_helper_web.dart';
 import '../../../../widgets/product_3d_viewer.dart';
+import 'reports_dashboard_screen.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -124,12 +125,41 @@ class _AdminScreenState extends State<AdminScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Dashboard de Reportes y Analítica',
-            onPressed: () {
-              Navigator.of(context).pushNamed('/reports');
+          Builder(
+            builder: (ctx) {
+              final isNarrow = MediaQuery.of(ctx).size.width < 600;
+              if (isNarrow) {
+                return IconButton(
+                  tooltip: 'Métricas & Reportes',
+                  onPressed: () {
+                    Navigator.of(context).pushNamed('/reports');
+                  },
+                  icon: const Icon(Icons.bar_chart_rounded, color: AppColors.velocityGreen),
+                );
+              }
+              return Container(
+                margin: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.velocityGreenDark,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pushNamed('/reports');
+                  },
+                  icon: const Icon(Icons.bar_chart_rounded, size: 18),
+                  label: const Text(
+                    'Métricas & Reportes',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                  ),
+                ),
+              );
             },
-            icon: const Icon(Icons.bar_chart_rounded, color: AppColors.velocityGreen),
           ),
           IconButton(
             tooltip: 'Ver como Cliente (/home)',
