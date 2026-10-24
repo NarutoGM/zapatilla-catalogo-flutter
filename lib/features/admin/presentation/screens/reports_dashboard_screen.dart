@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../models/report_models.dart';
 import '../../services/excel_export_service.dart';
+import '../../services/pdf_export_service.dart';
 import '../../services/reports_service.dart';
 
 /// Opciones predefinidas de filtrado por rango de fechas.
@@ -59,6 +60,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
 
   // Estado de exportación
   bool _exportingExcel = false;
+  bool _exportingPdf = false;
 
   @override
   void initState() {
@@ -158,27 +160,73 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     });
   }
 
-  void _handleExportPdf() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(
-          children: [
-            Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Generador de PDF listo para enlazar en el siguiente paso.',
-                style: TextStyle(fontWeight: FontWeight.w600),
+  Future<void> _handleExportPdf() async {
+    if (_summary == null || _exportingPdf) return;
+
+    setState(() {
+      _exportingPdf = true;
+    });
+
+    try {
+      // 1. Obtener catálogo completo de inventario
+      final allZapatillas = await _reportsService.getInventoryProducts();
+
+      // 2. Generar el documento PDF A4 y abrir diálogo de impresión / descarga nativo
+      final fileName = await PdfExportService.exportDashboardToPdf(
+        summary: _summary!,
+        allZapatillas: allZapatillas,
+        filterLabel: _selectedFilter.label,
+      );
+
+      if (!mounted) return;
+
+      // 3. Notificación de éxito
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '✅ Reporte PDF generado con éxito: $fileName',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 4),
         ),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 3),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Error al generar PDF: $e'),
+              ),
+            ],
+          ),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exportingPdf = false;
+        });
+      }
+    }
   }
 
   Future<void> _handleExportExcel() async {
@@ -546,9 +594,18 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
       children: [
         // Botón Descargar PDF
         ElevatedButton.icon(
-          onPressed: _handleExportPdf,
-          icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
-          label: const Text('Descargar PDF'),
+          onPressed: _exportingPdf ? null : _handleExportPdf,
+          icon: _exportingPdf
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.picture_as_pdf_rounded, size: 18),
+          label: Text(_exportingPdf ? 'Generando PDF...' : 'Descargar PDF'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.primary,
             foregroundColor: Colors.white,
