@@ -18,36 +18,21 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ApiService _apiService = ApiService();
 
-  /// Catálogo base con modelos 3D (.glb) reales listos para rotar 360°.
-  /// Se combinan con las zapatillas activas que vengan del backend NestJS/Firebase.
+  static const String _firebaseStorageGlbUrl =
+      'https://storage.googleapis.com/banco-de-imagenes-eaffd.firebasestorage.app/zapatillas/sneakers-poly-google.glb';
+
+  /// Catálogo base con tu archivo .glb en assets y en Firebase Storage.
   static const List<Zapatilla> _catalogoBase3D = [
     Zapatilla(
-      id: '3d-sample-1',
-      nombre: 'Nike Air Velocity 3D',
+      id: '3d-sample-storage',
+      nombre: 'Nike Air Velocity (Storage .glb)',
       marca: 'Nike',
       precio: 185.00,
       talla: '40, 41, 42, 43',
       stock: 12,
-      imagenUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/screenshot/screenshot_large.jpg',
-      modelo3dUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb',
+      modelo3dUrl: _firebaseStorageGlbUrl,
       descripcion:
-          'Zapatilla deportiva con modelo 3D interactivo en formato .glb. Arrastra en el detalle para rotarla 360°.',
-    ),
-    Zapatilla(
-      id: '3d-sample-2',
-      nombre: 'Adidas Street Runner',
-      marca: 'Adidas',
-      precio: 149.90,
-      talla: '39, 40, 41, 42',
-      stock: 15,
-      imagenUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/screenshot/screenshot_large.jpg',
-      modelo3dUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb',
-      descripcion:
-          'Diseño urbano ligero con suela de alto agarre y visualización 360°.',
+          'Tu archivo .glb subido a Firebase Storage con CORS habilitado.',
     ),
   ];
 
@@ -70,20 +55,15 @@ class _HomeScreenState extends State<HomeScreen> {
       final remotas = await _apiService.getZapatillas();
       if (!mounted) return;
 
-      // Si las zapatillas de Firebase traen una URL de ejemplo inválida ("https://.../shoe.glb"),
-      // les asignamos el .glb 3D real de respaldo para que el visor 3D funcione siempre en la demo.
       final remotasNormalizadas = remotas.map((z) {
         final url = z.modelo3dUrl?.trim() ?? '';
-        final esUrlValida =
-            url.isNotEmpty && !url.contains('...') && url.startsWith('http');
+        final esUrlValida = url.isNotEmpty &&
+            !url.contains('...') &&
+            !url.contains('glTF-Sample-Models') &&
+            (url.startsWith('http') || url.startsWith('assets/'));
         if (!esUrlValida) {
           return z.copyWith(
-            modelo3dUrl: _catalogoBase3D.first.modelo3dUrl,
-            imagenUrl: (z.imagenUrl != null &&
-                    z.imagenUrl!.isNotEmpty &&
-                    !z.imagenUrl!.contains('...'))
-                ? z.imagenUrl
-                : _catalogoBase3D.first.imagenUrl,
+            modelo3dUrl: _firebaseStorageGlbUrl,
           );
         }
         return z;
@@ -95,13 +75,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ..._catalogoBase3D,
         ];
         _syncInfo =
-            'Conectado al backend (${remotas.length} de Firebase + ${_catalogoBase3D.length} demos 3D)';
+            'Conectado a Firebase (${remotas.length} en BD + ${_catalogoBase3D.length} modelos 3D listos)';
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _zapatillas = _catalogoBase3D;
-        _syncInfo = 'Modo catálogo 3D local (Backend en puerto 3001 no detectado)';
+        _syncInfo =
+            'Catálogo 3D listo (incluye tu .glb en assets y en Firebase Storage)';
       });
     } finally {
       if (mounted) {
@@ -381,8 +362,8 @@ class _ZapatillaCard extends StatelessWidget {
               Stack(
                 children: [
                   Container(
-                    width: 92,
-                    height: 92,
+                    width: 88,
+                    height: 88,
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: BorderRadius.circular(14),
@@ -442,9 +423,9 @@ class _ZapatillaCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
 
-              // Información de la zapatilla
+              // Información de la zapatilla (sin overflow en pantallas angostas)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,7 +443,7 @@ class _ZapatillaCard extends StatelessWidget {
                     Text(
                       zapatilla.nombre,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textPrimary,
                       ),
@@ -477,49 +458,58 @@ class _ZapatillaCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '\$${zapatilla.precio.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textPrimary,
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '\$${zapatilla.precio.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
                           ),
                         ),
-                        Row(
-                          children: [
-                            TextButton.icon(
-                              onPressed: onTap,
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.primaryLight,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.view_in_ar_rounded,
-                                size: 16,
-                              ),
-                              label: const Text(
-                                'Ver 3D',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                        const SizedBox(width: 4),
+                        TextButton.icon(
+                          onPressed: onTap,
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.primaryLight,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                            IconButton(
-                              onPressed: onQuickAdd,
-                              tooltip: 'Agregar al carrito',
-                              icon: const Icon(
-                                Icons.add_shopping_cart_rounded,
-                                color: AppColors.primary,
-                                size: 20,
-                              ),
+                          ),
+                          icon: const Icon(
+                            Icons.view_in_ar_rounded,
+                            size: 15,
+                          ),
+                          label: const Text(
+                            'Ver 3D',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
                             ),
-                          ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: onQuickAdd,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 34,
+                            minHeight: 34,
+                          ),
+                          padding: EdgeInsets.zero,
+                          tooltip: 'Agregar al carrito',
+                          icon: const Icon(
+                            Icons.add_shopping_cart_rounded,
+                            color: AppColors.primary,
+                            size: 19,
+                          ),
                         ),
                       ],
                     ),
