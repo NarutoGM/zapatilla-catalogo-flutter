@@ -125,6 +125,13 @@ class _AdminScreenState extends State<AdminScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Dashboard de Reportes y Analítica',
+            onPressed: () {
+              Navigator.of(context).pushNamed('/reports');
+            },
+            icon: const Icon(Icons.bar_chart_rounded, color: AppColors.velocityGreen),
+          ),
+          IconButton(
             tooltip: 'Ver como Cliente (/home)',
             onPressed: () {
               Navigator.of(context).pushReplacementNamed('/home');

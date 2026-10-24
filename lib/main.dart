@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'features/admin/presentation/screens/admin_screen.dart';
+import 'features/admin/presentation/screens/reports_dashboard_screen.dart';
 import 'features/auth/presentation/controllers/auth_controller.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'features/home/presentation/screens/cart_screen.dart';
@@ -44,6 +45,7 @@ class PizzoApp extends StatelessWidget {
           '/home': (context) => const HomeScreen(),
           '/cart': (context) => const CartScreen(),
           '/admin': (context) => const AdminScreen(),
+          '/reports': (context) => const ReportsDashboardScreen(),
         },
       ),
     );
