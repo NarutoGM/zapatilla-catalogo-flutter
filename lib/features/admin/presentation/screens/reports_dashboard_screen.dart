@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/constants/app_colors.dart';
 import '../../models/report_models.dart';
+import '../../services/excel_export_service.dart';
 import '../../services/reports_service.dart';
 
 /// Opciones predefinidas de filtrado por rango de fechas.
@@ -55,6 +56,9 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
 
   // Estado del gráfico de barras interactivo (índice del punto seleccionado)
   int? _hoveredBarIndex;
+
+  // Estado de exportación
+  bool _exportingExcel = false;
 
   @override
   void initState() {
@@ -177,27 +181,73 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
     );
   }
 
-  void _handleExportExcel() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Row(
-          children: [
-            Icon(Icons.table_view_rounded, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Exportación a Excel / CSV lista para enlazar en el siguiente paso.',
-                style: TextStyle(fontWeight: FontWeight.w600),
+  Future<void> _handleExportExcel() async {
+    if (_summary == null || _exportingExcel) return;
+
+    setState(() {
+      _exportingExcel = true;
+    });
+
+    try {
+      // 1. Obtener catálogo completo de inventario para la Hoja 3
+      final allZapatillas = await _reportsService.getInventoryProducts();
+
+      // 2. Generar el libro Excel estructurado y ejecutar descarga / compartir nativo
+      final resultName = await ExcelExportService.exportDashboardToExcel(
+        summary: _summary!,
+        allZapatillas: allZapatillas,
+        filterLabel: _selectedFilter.label,
+      );
+
+      if (!mounted) return;
+
+      // 3. Notificación de éxito
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '✅ Reporte Excel descargado con éxito: $resultName',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: AppColors.velocityGreenDark,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 4),
         ),
-        backgroundColor: AppColors.velocityGreenDark,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 3),
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text('Error al exportar a Excel: $e'),
+              ),
+            ],
+          ),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exportingExcel = false;
+        });
+      }
+    }
   }
 
   @override
@@ -511,9 +561,18 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
         const SizedBox(width: 10),
         // Botón Exportar a Excel
         ElevatedButton.icon(
-          onPressed: _handleExportExcel,
-          icon: const Icon(Icons.table_chart_rounded, size: 18),
-          label: const Text('Exportar a Excel'),
+          onPressed: _exportingExcel ? null : _handleExportExcel,
+          icon: _exportingExcel
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.table_chart_rounded, size: 18),
+          label: Text(_exportingExcel ? 'Generando Excel...' : 'Exportar a Excel'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.velocityGreenDark,
             foregroundColor: Colors.white,
