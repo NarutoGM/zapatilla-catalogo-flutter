@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../models/filtros_catalogo.dart';
 import '../../../../models/zapatilla.dart';
 import '../../../../services/api_service.dart';
 import '../../../../services/cart_service.dart';
 import '../../../auth/presentation/controllers/auth_controller.dart';
 import 'cart_screen.dart';
 import 'product_detail_screen.dart';
+import '../widgets/filters_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -40,20 +44,71 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = false;
   String? _syncInfo;
 
+  // --- Filtros y búsqueda ---
+  FiltrosCatalogo _filtros = const FiltrosCatalogo();
+  final TextEditingController _busquedaCtrl = TextEditingController();
+  Timer? _debounce;
+
+  /// Evita que una respuesta lenta pise a una más reciente
+  /// (p. ej. el usuario escribe rápido y llegan respuestas desordenadas).
+  int _peticionActual = 0;
+
+  /// Marcas vistas en el catálogo; alimentan las opciones de la hoja.
+  final Set<String> _marcas = {
+    for (final z in _catalogoBase3D) z.marca,
+  };
+
   @override
   void initState() {
     super.initState();
     _cargarCatalogo();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Espera 400 ms sin teclear antes de consultar al backend,
+  /// para no hacer una petición por cada letra.
+  void _onBusquedaChanged(String texto) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      _aplicarFiltros(_filtros.copyWith(q: texto));
+    });
+  }
+
+  void _aplicarFiltros(FiltrosCatalogo nuevos) {
+    setState(() => _filtros = nuevos);
+    _cargarCatalogo();
+  }
+
+  Future<void> _abrirFiltros() async {
+    final resultado = await mostrarFiltersSheet(
+      context,
+      filtros: _filtros,
+      marcas: _marcas.toList()..sort(),
+    );
+    if (resultado != null) _aplicarFiltros(resultado);
+  }
+
+  void _limpiarTodo() {
+    _debounce?.cancel();
+    _busquedaCtrl.clear();
+    _aplicarFiltros(const FiltrosCatalogo());
+  }
+
   Future<void> _cargarCatalogo() async {
+    final miPeticion = ++_peticionActual;
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final remotas = await _apiService.getZapatillas();
-      if (!mounted) return;
+      final remotas = await _apiService.getZapatillas(filtros: _filtros);
+      if (!mounted || miPeticion != _peticionActual) return;
 
       final remotasNormalizadas = remotas.map((z) {
         final url = z.modelo3dUrl?.trim() ?? '';
@@ -70,27 +125,56 @@ class _HomeScreenState extends State<HomeScreen> {
       }).toList();
 
       setState(() {
+        // El modelo de muestra no pasa por el backend, así que solo lo
+        // mostramos cuando no hay filtros (si no, aparecería siempre).
         _zapatillas = [
           ...remotasNormalizadas,
-          ..._catalogoBase3D,
+          if (!_filtros.hayFiltros) ..._catalogoBase3D,
         ];
-        _syncInfo =
-            'Conectado a Firebase (${remotas.length} en BD + ${_catalogoBase3D.length} modelos 3D listos)';
+        _marcas.addAll(remotas.map((z) => z.marca).where((m) => m.isNotEmpty));
+        _syncInfo = _filtros.hayFiltros
+            ? '${remotas.length} resultado(s) con los filtros aplicados'
+            : 'Conectado a Firebase (${remotas.length} en BD + ${_catalogoBase3D.length} modelos 3D listos)';
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || miPeticion != _peticionActual) return;
       setState(() {
-        _zapatillas = _catalogoBase3D;
-        _syncInfo =
-            'Catálogo 3D listo (incluye tu .glb en assets y en Firebase Storage)';
+        if (_filtros.hayFiltros) {
+          // Con filtros no tiene sentido mostrar el catálogo de muestra.
+          _zapatillas = const [];
+          _syncInfo = 'No se pudo consultar el catálogo con estos filtros';
+        } else {
+          _zapatillas = _catalogoBase3D;
+          _syncInfo =
+              'Catálogo 3D listo (incluye tu .glb en assets y en Firebase Storage)';
+        }
       });
     } finally {
-      if (mounted) {
+      if (mounted && miPeticion == _peticionActual) {
         setState(() {
           _isLoading = false;
         });
       }
     }
+  }
+
+  /// Chips con los filtros activos; cada uno se puede quitar con su (x).
+  List<Widget> _chipsActivos() {
+    Widget chip(String texto, FiltrosCatalogo sinEste) => InputChip(
+          label: Text(texto),
+          onDeleted: () => _aplicarFiltros(sinEste),
+        );
+    return [
+      if (_filtros.marca != null)
+        chip('Marca: ${_filtros.marca}',
+            _filtros.copyWith(quitarMarca: true)),
+      if (_filtros.talla != null)
+        chip('Talla ${_filtros.talla}', _filtros.copyWith(quitarTalla: true)),
+      if (_filtros.orden != null)
+        chip(_filtros.orden!.etiqueta, _filtros.copyWith(quitarOrden: true)),
+      if (_filtros.soloConStock)
+        chip('Solo con stock', _filtros.copyWith(soloConStock: false)),
+    ];
   }
 
   @override
@@ -282,10 +366,108 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                       const SizedBox(height: 12),
+
+                      // Barra de búsqueda + botón de filtros
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _busquedaCtrl,
+                              onChanged: _onBusquedaChanged,
+                              textInputAction: TextInputAction.search,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar por nombre, marca...',
+                                prefixIcon: const Icon(Icons.search_rounded),
+                                filled: true,
+                                fillColor: Colors.white,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 0,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide:
+                                      const BorderSide(color: AppColors.border),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide:
+                                      const BorderSide(color: AppColors.border),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filled(
+                            tooltip: 'Filtros',
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                            ),
+                            onPressed: _abrirFiltros,
+                            icon: Badge(
+                              isLabelVisible: _filtros.cantidadEnHoja > 0,
+                              label: Text('${_filtros.cantidadEnHoja}'),
+                              backgroundColor: AppColors.velocityGreen,
+                              child: const Icon(Icons.tune_rounded),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Chips de filtros activos + Limpiar
+                      if (_filtros.hayFiltros) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ..._chipsActivos(),
+                            TextButton(
+                              onPressed: _limpiarTodo,
+                              child: const Text('Limpiar'),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 12),
                     ],
                   ),
                 ),
               ),
+
+              // Estado vacío: ningún resultado con los filtros actuales
+              if (_zapatillas.isEmpty && !_isLoading)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.search_off_rounded,
+                          size: 56,
+                          color: AppColors.textSecondary,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No encontramos zapatillas con esos filtros',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          onPressed: _limpiarTodo,
+                          child: const Text('Limpiar filtros'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
               // Lista de tarjetas de zapatillas
               SliverPadding(
