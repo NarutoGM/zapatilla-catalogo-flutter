@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -130,8 +129,6 @@ class ApiService {
     bool includeInactive = false,
     FiltrosCatalogo? filtros,
   }) async {
-    // Los filtros viajan como query params: /zapatillas?q=nike&talla=42...
-    // Uri.replace se encarga de codificar espacios y acentos.
     final params = <String, String>{
       if (includeInactive) 'all': 'true',
       ...?filtros?.toQueryParams(),
@@ -171,8 +168,6 @@ class ApiService {
   }
 
   /// `POST /zapatillas/upload` (Solo ADMIN)
-  /// Sube una imagen (`.png`, `.jpg`, `.webp`) o un modelo 3D (`.glb`) a Firebase Storage
-  /// y devuelve su URL pública.
   Future<String> uploadFileBytes({
     required Uint8List bytes,
     required String fileName,
@@ -279,6 +274,114 @@ class ApiService {
     final data = _decodeBody(response);
     throw ApiException(
       _extractErrorMessage(data, 'Error al desactivar la zapatilla'),
+      statusCode: response.statusCode,
+    );
+  }
+
+  // ===========================================================================
+  // 3. PEDIDOS Y PASARELA MERCADO PAGO SANDBOX (/pedidos y /pagos)
+  // ===========================================================================
+
+  /// `POST /pedidos`
+  /// Registra un pedido en el backend a partir de los ítems del carrito.
+  Future<Map<String, dynamic>> crearPedido({
+    required List<Map<String, dynamic>> items,
+    required Map<String, dynamic> direccionEnvio,
+    String metodoPago = 'mercado_pago',
+    String? notas,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/pedidos');
+    final response = await http.post(
+      uri,
+      headers: _headers(),
+      body: jsonEncode({
+        'items': items,
+        'direccionEnvio': direccionEnvio,
+        'metodoPago': metodoPago,
+        if (notas != null && notas.isNotEmpty) 'notas': notas,
+      }),
+    );
+
+    final data = _decodeBody(response);
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data is Map<String, dynamic>) {
+      return data;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(data, 'Error al registrar pedido'),
+      statusCode: response.statusCode,
+    );
+  }
+
+  /// `POST /pagos/crear-preferencia`
+  /// Genera la preferencia y link de checkout en Mercado Pago Sandbox.
+  Future<Map<String, dynamic>> crearPreferenciaPago(String pedidoId) async {
+    final uri = Uri.parse('$_baseUrl/pagos/crear-preferencia');
+    final response = await http.post(
+      uri,
+      headers: _headers(),
+      body: jsonEncode({'pedidoId': pedidoId}),
+    );
+
+    final data = _decodeBody(response);
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data is Map<String, dynamic>) {
+      return data;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(data, 'Error al generar preferencia de Mercado Pago'),
+      statusCode: response.statusCode,
+    );
+  }
+
+  /// `POST /pagos/confirmar-simulado`
+  /// Procesa la aprobación o rechazo en la pasarela Sandbox de pruebas.
+  Future<Map<String, dynamic>> confirmarPagoSimulado({
+    required String pedidoId,
+    required String estado, // 'approved' o 'rejected'
+  }) async {
+    final uri = Uri.parse('$_baseUrl/pagos/confirmar-simulado');
+    final response = await http.post(
+      uri,
+      headers: _headers(),
+      body: jsonEncode({
+        'pedidoId': pedidoId,
+        'estado': estado,
+      }),
+    );
+
+    final data = _decodeBody(response);
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data is Map<String, dynamic>) {
+      return data;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(data, 'Error al confirmar pago simulado'),
+      statusCode: response.statusCode,
+    );
+  }
+
+  /// `GET /pedidos/:id`
+  /// Consulta el estado actual de un pedido.
+  Future<Map<String, dynamic>> getPedidoById(String pedidoId) async {
+    final uri = Uri.parse('$_baseUrl/pedidos/$pedidoId');
+    final response = await http.get(uri, headers: _headers(jsonBody: false));
+
+    final data = _decodeBody(response);
+    if (response.statusCode >= 200 &&
+        response.statusCode < 300 &&
+        data is Map<String, dynamic>) {
+      return data;
+    }
+
+    throw ApiException(
+      _extractErrorMessage(data, 'Error al consultar el pedido'),
       statusCode: response.statusCode,
     );
   }

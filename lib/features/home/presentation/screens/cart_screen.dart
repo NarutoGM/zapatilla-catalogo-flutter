@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../services/api_service.dart';
 import '../../../../services/cart_service.dart';
+import '../widgets/mercado_pago_checkout_modal.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
@@ -11,141 +13,94 @@ class CartScreen extends StatefulWidget {
 }
 
 class _CartScreenState extends State<CartScreen> {
+  final ApiService _apiService = ApiService();
   bool _procesando = false;
 
-  Future<void> _confirmarCompra(CartService cart) async {
-    setState(() => _procesando = true);
-    final order = await cart.procesarCompraSimulada();
-    if (!mounted) return;
-    setState(() => _procesando = false);
+  static const Color mpBlue = Color(0xFF009EE3);
+  static const Color mpDarkBlue = Color(0xFF0074A8);
 
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+  Future<void> _confirmarCompra(CartService cart) async {
+    if (cart.isEmpty) return;
+
+    setState(() => _procesando = true);
+
+    try {
+      // 1. Mapear los ítems del carrito al contrato del backend NestJS
+      final itemsPayload = cart.items.map((item) {
+        int tallaNum = 42;
+        final parsed = int.tryParse(item.tallaSeleccionada.replaceAll(RegExp(r'[^0-9]'), ''));
+        if (parsed != null) tallaNum = parsed;
+
+        return {
+          'zapatillaId': item.zapatilla.id,
+          'cantidad': item.cantidad,
+          'talla': tallaNum,
+          'precioUnitario': item.zapatilla.precio,
+        };
+      }).toList();
+
+      final direccionEnvio = {
+        'calle': 'Av. España 123, Urb. El Recreo',
+        'ciudad': 'Trujillo',
+        'region': 'La Libertad',
+        'codigoPostal': '13001',
+        'telefono': '987654321',
+      };
+
+      // 2. Registrar el pedido en el Backend (persiste en Firestore)
+      final pedido = await _apiService.crearPedido(
+        items: itemsPayload,
+        direccionEnvio: direccionEnvio,
+        metodoPago: 'mercado_pago',
+        notas: 'Entrega prioritaria',
+      );
+
+      final pedidoId = pedido['id'].toString();
+
+      // 3. Crear la preferencia de Mercado Pago Sandbox en el Backend
+      final preferencia = await _apiService.crearPreferenciaPago(pedidoId);
+
+      final prefId = (preferencia['preferenciaId'] ?? '').toString();
+      final sandboxUrl = (preferencia['sandboxInitPoint'] ?? '').toString();
+      final montoTotal = (preferencia['montoTotal'] is num)
+          ? (preferencia['montoTotal'] as num).toDouble()
+          : cart.totalPrecio + 15.0;
+
+      if (!mounted) return;
+      setState(() => _procesando = false);
+
+      // 4. Mostrar el Checkout interactivo de Mercado Pago Sandbox
+      await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => MercadoPagoCheckoutModal(
+          pedidoId: pedidoId,
+          preferenciaId: prefId,
+          sandboxInitPoint: sandboxUrl,
+          montoTotal: montoTotal,
+          apiService: _apiService,
+          onPagoExitoso: () {
+            cart.vaciarCarrito();
+          },
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _procesando = false);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text('Error al conectar con la pasarela de pagos: $e'),
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Reintentar',
+            textColor: Colors.white,
+            onPressed: () => _confirmarCompra(cart),
           ),
-          title: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.velocityGreen.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
-                  color: AppColors.velocityGreenDark,
-                  size: 44,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '¡Pedido Confirmado!',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 20,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryLight.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    'Pedido #${order.id} · Pago Simulado',
-                    style: const TextStyle(
-                      color: AppColors.primaryLight,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ...order.items.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${item.cantidad}x ${item.zapatilla.nombre} (EU ${item.tallaSeleccionada})',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                      ),
-                      Text(
-                        '\$${item.subtotal.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Divider(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Total pagado',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
-                  ),
-                  Text(
-                    '\$${order.total.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      color: AppColors.primaryLight,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                onPressed: () {
-                  Navigator.of(ctx).pop();
-                  Navigator.of(context).pop();
-                },
-                child: const Text('Volver al Catálogo'),
-              ),
-            ),
-          ],
-        );
-      },
-    );
+        ),
+      );
+    }
   }
 
   @override
@@ -356,19 +311,61 @@ class _CartScreenState extends State<CartScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text(
-                              'Total a pagar',
+                              'Subtotal productos',
                               style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
                                 color: AppColors.textSecondary,
                               ),
                             ),
                             Text(
                               '\$${cart.totalPrecio.toStringAsFixed(2)}',
                               style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Costo de envío',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                            Text(
+                              '\$15.00',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.velocityGreenDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 20),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Total con envío',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            Text(
+                              '\$${(cart.totalPrecio + 15.0).toStringAsFixed(2)}',
+                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w900,
-                                color: AppColors.primaryLight,
+                                color: mpDarkBlue,
                               ),
                             ),
                           ],
@@ -379,31 +376,32 @@ class _CartScreenState extends State<CartScreen> {
                           height: 52,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.velocityGreenDark,
+                              backgroundColor: mpBlue,
                               foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14),
                               ),
+                              elevation: 2,
                             ),
                             onPressed: _procesando
                                 ? null
                                 : () => _confirmarCompra(cart),
                             icon: _procesando
                                 ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
+                                    width: 20,
+                                    height: 20,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
                                       color: Colors.white,
                                     ),
                                   )
-                                : const Icon(Icons.payment_rounded),
+                                : const Icon(Icons.lock_outline_rounded),
                             label: Text(
                               _procesando
-                                  ? 'Procesando compra...'
-                                  : 'Comprar ahora (Pago simulado)',
+                                  ? 'Conectando con Mercado Pago...'
+                                  : 'Pagar con Mercado Pago Sandbox',
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 15,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
