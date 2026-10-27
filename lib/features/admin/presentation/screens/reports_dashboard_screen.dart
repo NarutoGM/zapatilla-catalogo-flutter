@@ -1379,12 +1379,14 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                           size: 22,
                         ),
                         const SizedBox(width: 8),
-                        const Text(
-                          'Alerta de Inventario y Stock Crítico',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: AppColors.textPrimary,
+                        const Expanded(
+                          child: Text(
+                            'Alerta de Inventario y Stock Crítico',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
                           ),
                         ),
                       ],
@@ -1471,16 +1473,17 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.check_circle_rounded, color: AppColors.velocityGreenDark),
                   SizedBox(width: 10),
-                  Text(
-                    'Excelente: Todo el catálogo se encuentra con niveles de stock saludables.',
-                    style: TextStyle(
-                      color: AppColors.velocityGreenDark,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
+                  Expanded(
+                    child: Text(
+                      'Excelente: Todo el catálogo se encuentra con niveles de stock saludables.',
+                      style: TextStyle(
+                        color: AppColors.velocityGreenDark,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
