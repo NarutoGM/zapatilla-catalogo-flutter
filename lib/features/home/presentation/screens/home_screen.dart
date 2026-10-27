@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // mostramos cuando no hay filtros (si no, aparecería siempre).
         _zapatillas = [
           ...remotasNormalizadas,
-          if (!_filtros.hayFiltros) ..._catalogoBase3D,
+          if (!_filtros.hayFiltros) ..._catalogoBase3D.where((base) => !remotasNormalizadas.any((r) => r.id == base.id)),
         ];
         _marcas.addAll(remotas.map((z) => z.marca).where((m) => m.isNotEmpty));
         _syncInfo = _filtros.hayFiltros
@@ -225,10 +225,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             tooltip: 'Mi Carrito',
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CartScreen()),
               );
+              _cargarCatalogo();
             },
             icon: Badge(
               isLabelVisible: !cart.isEmpty,
@@ -480,12 +481,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     final z = _zapatillas[index];
                     return _ZapatillaCard(
                       zapatilla: z,
-                      onTap: () {
-                        Navigator.of(context).push(
+                      onTap: () async {
+                        await Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => ProductDetailScreen(zapatilla: z),
                           ),
                         );
+                        _cargarCatalogo();
                       },
                       onQuickAdd: () {
                         context.read<CartService>().agregarAlCarrito(z);
