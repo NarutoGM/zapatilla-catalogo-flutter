@@ -895,7 +895,7 @@ class _ReportsDashboardScreenState extends State<ReportsDashboardScreen> {
           if (points.isEmpty)
             Container(
               height: 220,
-              alignment: Center,
+              alignment: Alignment.center,
               child: const Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
