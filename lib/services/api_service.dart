@@ -1,7 +1,9 @@
+
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import '../models/filtros_catalogo.dart';
 import '../models/user_model.dart';
 import '../models/zapatilla.dart';
 
@@ -124,9 +126,18 @@ class ApiService {
   // ===========================================================================
 
   /// `GET /zapatillas` (o `GET /zapatillas?all=true` para admin)
-  Future<List<Zapatilla>> getZapatillas({bool includeInactive = false}) async {
-    final query = includeInactive ? '?all=true' : '';
-    final uri = Uri.parse('$_baseUrl/zapatillas$query');
+  Future<List<Zapatilla>> getZapatillas({
+    bool includeInactive = false,
+    FiltrosCatalogo? filtros,
+  }) async {
+    // Los filtros viajan como query params: /zapatillas?q=nike&talla=42...
+    // Uri.replace se encarga de codificar espacios y acentos.
+    final params = <String, String>{
+      if (includeInactive) 'all': 'true',
+      ...?filtros?.toQueryParams(),
+    };
+    final uri = Uri.parse('$_baseUrl/zapatillas')
+        .replace(queryParameters: params.isEmpty ? null : params);
     final response = await http.get(uri, headers: _headers(jsonBody: false));
 
     final data = _decodeBody(response);
