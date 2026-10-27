@@ -386,6 +386,19 @@ class ApiService {
     );
   }
 
+  /// `GET /pedidos`
+  /// Obtiene todos los pedidos registrados en el backend para reportes y métricas.
+  Future<List<Map<String, dynamic>>> getPedidos() async {
+    final uri = Uri.parse('$_baseUrl/pedidos');
+    final response = await http.get(uri, headers: _headers(jsonBody: false));
+
+    final data = _decodeBody(response);
+    if (response.statusCode >= 200 && response.statusCode < 300 && data is List) {
+      return data.whereType<Map<String, dynamic>>().toList();
+    }
+    return [];
+  }
+
   // ===========================================================================
   // Helpers privados
   // ===========================================================================

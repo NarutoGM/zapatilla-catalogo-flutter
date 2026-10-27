@@ -34,7 +34,7 @@ class OrderItemModel {
       productName: (json['productName'] ?? json['nombre'] ?? json['producto'] ?? 'Zapatilla').toString(),
       brand: (json['brand'] ?? json['marca'] ?? '').toString(),
       size: (json['size'] ?? json['talla'] ?? '41').toString(),
-      price: _parseDouble(json['price'] ?? json['precio']),
+      price: _parseDouble(json['price'] ?? json['precio'] ?? json['precioUnitario']),
       quantity: _parseInt(json['quantity'] ?? json['cantidad'], fallback: 1),
       imageUrl: json['imageUrl'] as String? ?? json['imagenUrl'] as String?,
     );
@@ -130,7 +130,7 @@ class OrderModel {
       totalAmount: rawTotal > 0 ? rawTotal : calculatedTotal,
       status: (json['status'] ?? json['estado'] ?? 'completed').toString(),
       paymentMethod: (json['paymentMethod'] ?? json['metodoPago'] ?? 'Tarjeta').toString(),
-      createdAt: _parseDateTime(json['createdAt'] ?? json['fecha'] ?? json['timestamp']),
+      createdAt: _parseDateTime(json['createdAt'] ?? json['fechaCreacion'] ?? json['fecha'] ?? json['timestamp']),
       isMock: json['isMock'] is bool ? json['isMock'] as bool : false,
     );
   }

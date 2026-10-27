@@ -74,8 +74,21 @@ class ReportsService {
 
     List<OrderModel> realOrders = [];
 
-    // Paso 1: Comprobar si Firebase está listo e inicializado
-    final bool canUseFirebase = Firebase.apps.isNotEmpty;
+    // Paso 1: Obtener pedidos reales desde el Backend NestJS (conectado a Firestore)
+    try {
+      final pedidosBackend = await _apiService.getPedidos();
+      if (pedidosBackend.isNotEmpty) {
+        realOrders = pedidosBackend
+            .map((json) => OrderModel.fromJson(json))
+            .toList();
+        debugPrint('[ReportsService] Éxito: Se obtuvieron ${realOrders.length} pedidos reales desde el Backend NestJS.');
+      }
+    } catch (e) {
+      debugPrint('[ReportsService] Error consultando /pedidos en backend: $e');
+    }
+
+    // Paso 1.1: Si no hubo pedidos del backend pero Firebase está listo en Flutter
+    final bool canUseFirebase = realOrders.isEmpty && Firebase.apps.isNotEmpty;
 
     if (canUseFirebase) {
       try {
