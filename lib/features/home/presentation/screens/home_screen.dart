@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../core/constants/app_colors.dart';
+import '../../../../models/filtros_catalogo.dart';
 import '../../../../models/zapatilla.dart';
 import '../../../../services/api_service.dart';
 import '../../../../services/cart_service.dart';
 import '../../../auth/presentation/controllers/auth_controller.dart';
 import 'cart_screen.dart';
 import 'product_detail_screen.dart';
+import '../widgets/filters_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,36 +22,21 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final ApiService _apiService = ApiService();
 
-  /// Catálogo base con modelos 3D (.glb) reales listos para rotar 360°.
-  /// Se combinan con las zapatillas activas que vengan del backend NestJS/Firebase.
+  static const String _firebaseStorageGlbUrl =
+      'https://storage.googleapis.com/banco-de-imagenes-eaffd.firebasestorage.app/zapatillas/sneakers-poly-google.glb';
+
+  /// Catálogo base con tu archivo .glb en assets y en Firebase Storage.
   static const List<Zapatilla> _catalogoBase3D = [
     Zapatilla(
-      id: '3d-sample-1',
-      nombre: 'Nike Air Velocity 3D',
+      id: '3d-sample-storage',
+      nombre: 'Nike Air Velocity (Storage .glb)',
       marca: 'Nike',
       precio: 185.00,
       talla: '40, 41, 42, 43',
       stock: 12,
-      imagenUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/screenshot/screenshot_large.jpg',
-      modelo3dUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb',
+      modelo3dUrl: _firebaseStorageGlbUrl,
       descripcion:
-          'Zapatilla deportiva con modelo 3D interactivo en formato .glb. Arrastra en el detalle para rotarla 360°.',
-    ),
-    Zapatilla(
-      id: '3d-sample-2',
-      nombre: 'Adidas Street Runner',
-      marca: 'Adidas',
-      precio: 149.90,
-      talla: '39, 40, 41, 42',
-      stock: 15,
-      imagenUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/screenshot/screenshot_large.jpg',
-      modelo3dUrl:
-          'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/MaterialsVariantsShoe/glTF-Binary/MaterialsVariantsShoe.glb',
-      descripcion:
-          'Diseño urbano ligero con suela de alto agarre y visualización 360°.',
+          'Tu archivo .glb subido a Firebase Storage con CORS habilitado.',
     ),
   ];
 
@@ -55,61 +44,137 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = false;
   String? _syncInfo;
 
+  // --- Filtros y búsqueda ---
+  FiltrosCatalogo _filtros = const FiltrosCatalogo();
+  final TextEditingController _busquedaCtrl = TextEditingController();
+  Timer? _debounce;
+
+  /// Evita que una respuesta lenta pise a una más reciente
+  /// (p. ej. el usuario escribe rápido y llegan respuestas desordenadas).
+  int _peticionActual = 0;
+
+  /// Marcas vistas en el catálogo; alimentan las opciones de la hoja.
+  final Set<String> _marcas = {
+    for (final z in _catalogoBase3D) z.marca,
+  };
+
   @override
   void initState() {
     super.initState();
     _cargarCatalogo();
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _busquedaCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Espera 400 ms sin teclear antes de consultar al backend,
+  /// para no hacer una petición por cada letra.
+  void _onBusquedaChanged(String texto) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      _aplicarFiltros(_filtros.copyWith(q: texto));
+    });
+  }
+
+  void _aplicarFiltros(FiltrosCatalogo nuevos) {
+    setState(() => _filtros = nuevos);
+    _cargarCatalogo();
+  }
+
+  Future<void> _abrirFiltros() async {
+    final resultado = await mostrarFiltersSheet(
+      context,
+      filtros: _filtros,
+      marcas: _marcas.toList()..sort(),
+    );
+    if (resultado != null) _aplicarFiltros(resultado);
+  }
+
+  void _limpiarTodo() {
+    _debounce?.cancel();
+    _busquedaCtrl.clear();
+    _aplicarFiltros(const FiltrosCatalogo());
+  }
+
   Future<void> _cargarCatalogo() async {
+    final miPeticion = ++_peticionActual;
     setState(() {
       _isLoading = true;
     });
 
     try {
-      final remotas = await _apiService.getZapatillas();
-      if (!mounted) return;
+      final remotas = await _apiService.getZapatillas(filtros: _filtros);
+      if (!mounted || miPeticion != _peticionActual) return;
 
-      // Si las zapatillas de Firebase traen una URL de ejemplo inválida ("https://.../shoe.glb"),
-      // les asignamos el .glb 3D real de respaldo para que el visor 3D funcione siempre en la demo.
       final remotasNormalizadas = remotas.map((z) {
         final url = z.modelo3dUrl?.trim() ?? '';
-        final esUrlValida =
-            url.isNotEmpty && !url.contains('...') && url.startsWith('http');
+        final esUrlValida = url.isNotEmpty &&
+            !url.contains('...') &&
+            !url.contains('glTF-Sample-Models') &&
+            (url.startsWith('http') || url.startsWith('assets/'));
         if (!esUrlValida) {
           return z.copyWith(
-            modelo3dUrl: _catalogoBase3D.first.modelo3dUrl,
-            imagenUrl: (z.imagenUrl != null &&
-                    z.imagenUrl!.isNotEmpty &&
-                    !z.imagenUrl!.contains('...'))
-                ? z.imagenUrl
-                : _catalogoBase3D.first.imagenUrl,
+            modelo3dUrl: _firebaseStorageGlbUrl,
           );
         }
         return z;
       }).toList();
 
       setState(() {
+        // El modelo de muestra no pasa por el backend, así que solo lo
+        // mostramos cuando no hay filtros (si no, aparecería siempre).
         _zapatillas = [
           ...remotasNormalizadas,
-          ..._catalogoBase3D,
+          if (!_filtros.hayFiltros) ..._catalogoBase3D.where((base) => !remotasNormalizadas.any((r) => r.id == base.id)),
         ];
-        _syncInfo =
-            'Conectado al backend (${remotas.length} de Firebase + ${_catalogoBase3D.length} demos 3D)';
+        _marcas.addAll(remotas.map((z) => z.marca).where((m) => m.isNotEmpty));
+        _syncInfo = _filtros.hayFiltros
+            ? '${remotas.length} resultado(s) con los filtros aplicados'
+            : 'Conectado a Firebase (${remotas.length} en BD + ${_catalogoBase3D.length} modelos 3D listos)';
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || miPeticion != _peticionActual) return;
       setState(() {
-        _zapatillas = _catalogoBase3D;
-        _syncInfo = 'Modo catálogo 3D local (Backend en puerto 3001 no detectado)';
+        if (_filtros.hayFiltros) {
+          // Con filtros no tiene sentido mostrar el catálogo de muestra.
+          _zapatillas = const [];
+          _syncInfo = 'No se pudo consultar el catálogo con estos filtros';
+        } else {
+          _zapatillas = _catalogoBase3D;
+          _syncInfo =
+              'Catálogo 3D listo (incluye tu .glb en assets y en Firebase Storage)';
+        }
       });
     } finally {
-      if (mounted) {
+      if (mounted && miPeticion == _peticionActual) {
         setState(() {
           _isLoading = false;
         });
       }
     }
+  }
+
+  /// Chips con los filtros activos; cada uno se puede quitar con su (x).
+  List<Widget> _chipsActivos() {
+    Widget chip(String texto, FiltrosCatalogo sinEste) => InputChip(
+          label: Text(texto),
+          onDeleted: () => _aplicarFiltros(sinEste),
+        );
+    return [
+      if (_filtros.marca != null)
+        chip('Marca: ${_filtros.marca}',
+            _filtros.copyWith(quitarMarca: true)),
+      if (_filtros.talla != null)
+        chip('Talla ${_filtros.talla}', _filtros.copyWith(quitarTalla: true)),
+      if (_filtros.orden != null)
+        chip(_filtros.orden!.etiqueta, _filtros.copyWith(quitarOrden: true)),
+      if (_filtros.soloConStock)
+        chip('Solo con stock', _filtros.copyWith(soloConStock: false)),
+    ];
   }
 
   @override
@@ -160,10 +225,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           IconButton(
             tooltip: 'Mi Carrito',
-            onPressed: () {
-              Navigator.of(context).push(
+            onPressed: () async {
+              await Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const CartScreen()),
               );
+              _cargarCatalogo();
             },
             icon: Badge(
               isLabelVisible: !cart.isEmpty,
@@ -301,10 +367,108 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ],
                       const SizedBox(height: 12),
+
+                      // Barra de búsqueda + botón de filtros
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _busquedaCtrl,
+                              onChanged: _onBusquedaChanged,
+                              textInputAction: TextInputAction.search,
+                              decoration: InputDecoration(
+                                hintText: 'Buscar por nombre, marca...',
+                                prefixIcon: const Icon(Icons.search_rounded),
+                                filled: true,
+                                fillColor: Colors.white,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 0,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide:
+                                      const BorderSide(color: AppColors.border),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                  borderSide:
+                                      const BorderSide(color: AppColors.border),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton.filled(
+                            tooltip: 'Filtros',
+                            style: IconButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                            ),
+                            onPressed: _abrirFiltros,
+                            icon: Badge(
+                              isLabelVisible: _filtros.cantidadEnHoja > 0,
+                              label: Text('${_filtros.cantidadEnHoja}'),
+                              backgroundColor: AppColors.velocityGreen,
+                              child: const Icon(Icons.tune_rounded),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Chips de filtros activos + Limpiar
+                      if (_filtros.hayFiltros) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ..._chipsActivos(),
+                            TextButton(
+                              onPressed: _limpiarTodo,
+                              child: const Text('Limpiar'),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 12),
                     ],
                   ),
                 ),
               ),
+
+              // Estado vacío: ningún resultado con los filtros actuales
+              if (_zapatillas.isEmpty && !_isLoading)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.search_off_rounded,
+                          size: 56,
+                          color: AppColors.textSecondary,
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'No encontramos zapatillas con esos filtros',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton(
+                          onPressed: _limpiarTodo,
+                          child: const Text('Limpiar filtros'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
 
               // Lista de tarjetas de zapatillas
               SliverPadding(
@@ -317,12 +481,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     final z = _zapatillas[index];
                     return _ZapatillaCard(
                       zapatilla: z,
-                      onTap: () {
-                        Navigator.of(context).push(
+                      onTap: () async {
+                        await Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) => ProductDetailScreen(zapatilla: z),
                           ),
                         );
+                        _cargarCatalogo();
                       },
                       onQuickAdd: () {
                         context.read<CartService>().agregarAlCarrito(z);
@@ -381,8 +546,8 @@ class _ZapatillaCard extends StatelessWidget {
               Stack(
                 children: [
                   Container(
-                    width: 92,
-                    height: 92,
+                    width: 88,
+                    height: 88,
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: BorderRadius.circular(14),
@@ -442,9 +607,9 @@ class _ZapatillaCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
 
-              // Información de la zapatilla
+              // Información de la zapatilla (sin overflow en pantallas angostas)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,7 +627,7 @@ class _ZapatillaCard extends StatelessWidget {
                     Text(
                       zapatilla.nombre,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textPrimary,
                       ),
@@ -477,49 +642,58 @@ class _ZapatillaCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          '\$${zapatilla.precio.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textPrimary,
+                        Expanded(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '\$${zapatilla.precio.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
                           ),
                         ),
-                        Row(
-                          children: [
-                            TextButton.icon(
-                              onPressed: onTap,
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.primaryLight,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.view_in_ar_rounded,
-                                size: 16,
-                              ),
-                              label: const Text(
-                                'Ver 3D',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                        const SizedBox(width: 4),
+                        TextButton.icon(
+                          onPressed: onTap,
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.primaryLight,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
                             ),
-                            IconButton(
-                              onPressed: onQuickAdd,
-                              tooltip: 'Agregar al carrito',
-                              icon: const Icon(
-                                Icons.add_shopping_cart_rounded,
-                                color: AppColors.primary,
-                                size: 20,
-                              ),
+                          ),
+                          icon: const Icon(
+                            Icons.view_in_ar_rounded,
+                            size: 15,
+                          ),
+                          label: const Text(
+                            'Ver 3D',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
                             ),
-                          ],
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: onQuickAdd,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints(
+                            minWidth: 34,
+                            minHeight: 34,
+                          ),
+                          padding: EdgeInsets.zero,
+                          tooltip: 'Agregar al carrito',
+                          icon: const Icon(
+                            Icons.add_shopping_cart_rounded,
+                            color: AppColors.primary,
+                            size: 19,
+                          ),
                         ),
                       ],
                     ),

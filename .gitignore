@@ -50,3 +50,8 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Modelos 3D de terceros (no versionar por licencia; viven en Firebase Storage)
+*.glb
+*.gltf
+assets/models/

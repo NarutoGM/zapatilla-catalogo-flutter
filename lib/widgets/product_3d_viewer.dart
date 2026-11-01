@@ -1,25 +1,30 @@
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import '../theme/app_theme.dart';
+import 'model_viewer_web_loader_stub.dart'
+    if (dart.library.js_interop) 'model_viewer_web_loader_web.dart';
 
 /// Visor 3D interactivo para el detalle de una zapatilla.
 ///
-/// Características:
-/// - Descarga y verifica el archivo `.glb` mediante Dart `http` para evitar bloqueos
-///   de CORS del WebView con Firebase Storage y detectar URLs de prueba inválidas
-///   (como `"https://.../shoe.glb"`).
-/// - Muestra indicador de carga visible mientras se descarga el modelo 3D.
-/// - Si la zapatilla aún no tiene un `.glb` válido en Firebase, muestra automáticamente
-///   su foto 2D (`posterUrl`) en lugar de dejar el cuadro transparente.
+/// Funciona tanto en **Android/iOS** como en **Flutter Web (`localhost`)**:
+/// - En Web inyecta automáticamente `model-viewer.min.js` en el `<head>` del navegador,
+///   crea el elemento `<model-viewer>` directo en el DOM con `width/height: 100%`
+///   y ajusta la ruta de assets (`assets/assets/models/sneakers.glb`).
+/// - En Android/iOS usa `ModelViewer` de `model_viewer_plus`.
 class Product3DViewer extends StatefulWidget {
-  /// URL del modelo `.glb` (campo `modelo3dUrl` del backend).
+  /// Ruta local del `.glb` incluido en los assets de Flutter.
+  /// (Ya no se versiona ningún .glb en el repo: el fallback es el de Firebase Storage.)
+  static const String defaultLocalAssetGlb = firebaseStorageGlb;
+
+  /// URL del `.glb` subido al Firebase Storage del proyecto (con CORS habilitado).
+  static const String firebaseStorageGlb =
+      'https://storage.googleapis.com/banco-de-imagenes-eaffd.firebasestorage.app/zapatillas/sneakers-poly-google.glb';
+
+  /// URL del modelo `.glb` (campo `modelo3dUrl` del backend) o ruta `assets/...`.
   final String modelUrl;
 
-  /// URL opcional de la imagen 2D (`imagenUrl`) para mostrar como póster de carga
-  /// o como respaldo si el producto aún no tiene modelo 3D válido.
+  /// URL opcional de la imagen 2D (`imagenUrl`) como póster mientras carga.
   final String? posterUrl;
 
   /// Nombre de la zapatilla para accesibilidad (`alt`).
@@ -46,114 +51,57 @@ class Product3DViewer extends StatefulWidget {
 
 class _Product3DViewerState extends State<Product3DViewer> {
   late bool _autoRotate;
+  bool _forceLocalAsset = false;
+  bool _webScriptReady = !kIsWeb;
   int _viewerKeySeed = 0;
-
-  bool _isPreparingModel = false;
-  String? _resolvedSrc;
-  String? _errorReason;
 
   @override
   void initState() {
     super.initState();
     _autoRotate = widget.initialAutoRotate;
-    _prepareModelSource();
+    if (kIsWeb) {
+      ensureModelViewerScriptLoaded().then((_) {
+        if (mounted) {
+          setState(() {
+            _webScriptReady = true;
+          });
+        }
+      });
+    }
   }
 
-  @override
-  void didUpdateWidget(covariant Product3DViewer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.modelUrl != widget.modelUrl) {
-      _prepareModelSource();
+  bool get _hasValidRemoteUrl {
+    final trimmed = widget.modelUrl.trim();
+    if (trimmed.isEmpty ||
+        trimmed.contains('...') ||
+        trimmed.contains('glTF-Sample-Models')) {
+      return false;
     }
+    return trimmed.startsWith('http://') || trimmed.startsWith('https://');
   }
 
-  bool _isPlausibleUrl(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) return false;
-    if (trimmed.contains('...')) return false; // Ej: "https://.../shoe.glb"
-    if (trimmed.startsWith('assets/')) return true;
-    final uri = Uri.tryParse(trimmed);
-    return uri != null &&
-        (uri.scheme == 'http' || uri.scheme == 'https') &&
-        uri.host.isNotEmpty &&
-        uri.host != '...';
-  }
-
-  Future<void> _prepareModelSource() async {
-    final rawUrl = widget.modelUrl.trim();
-
-    if (rawUrl.isEmpty) {
-      setState(() {
-        _isPreparingModel = false;
-        _resolvedSrc = null;
-        _errorReason = 'Esta zapatilla aún no tiene modelo3dUrl en Firebase';
-      });
-      return;
-    }
-
-    if (!_isPlausibleUrl(rawUrl)) {
-      setState(() {
-        _isPreparingModel = false;
-        _resolvedSrc = null;
-        _errorReason = 'URL de prueba no válida: "$rawUrl"';
-      });
-      return;
-    }
-
-    if (rawUrl.startsWith('assets/') || kIsWeb) {
-      setState(() {
-        _isPreparingModel = false;
-        _resolvedSrc = rawUrl;
-        _errorReason = null;
-      });
-      return;
-    }
-
-    setState(() {
-      _isPreparingModel = true;
-      _errorReason = null;
-    });
-
-    try {
-      // Descargamos el archivo .glb por HTTP nativo de Dart para:
-      // 1) Saltar cualquier bloqueo CORS del WebView con Firebase Storage
-      // 2) Comprobar que la URL realmente existe y devuelve un binario .glb
-      final response = await http
-          .get(Uri.parse(rawUrl))
-          .timeout(const Duration(seconds: 20));
-
-      if (!mounted) return;
-
-      if (response.statusCode >= 200 &&
-          response.statusCode < 300 &&
-          response.bodyBytes.length > 100) {
-        final tempDir = Directory.systemTemp;
-        final safeHash = rawUrl.hashCode.abs();
-        final file = File('${tempDir.path}/shoe_model_$safeHash.glb');
-        await file.writeAsBytes(response.bodyBytes, flush: true);
-
-        if (!mounted) return;
-        setState(() {
-          _resolvedSrc = 'file://${file.path}';
-          _isPreparingModel = false;
-          _errorReason = null;
-        });
+  /// Devuelve la fuente `.glb` efectiva que renderizará `ModelViewer`,
+  /// adaptando la ruta si corre en Flutter Web (`kIsWeb`).
+  String get _effectiveSrc {
+    String raw;
+    if (_forceLocalAsset) {
+      raw = Product3DViewer.defaultLocalAssetGlb;
+    } else {
+      final trimmed = widget.modelUrl.trim();
+      if (trimmed.startsWith('assets/')) {
+        raw = trimmed;
+      } else if (_hasValidRemoteUrl) {
+        raw = trimmed;
       } else {
-        setState(() {
-          _resolvedSrc = null;
-          _isPreparingModel = false;
-          _errorReason =
-              'No se pudo descargar el .glb (HTTP ${response.statusCode})';
-        });
+        raw = Product3DViewer.defaultLocalAssetGlb;
       }
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _resolvedSrc = null;
-        _isPreparingModel = false;
-        _errorReason = 'No se pudo cargar el archivo 3D desde la URL';
-      });
     }
+
+    // En Flutter Web, los archivos dentro de `assets/...` se sirven bajo `assets/assets/...`
+    if (kIsWeb && raw.startsWith('assets/') && !raw.startsWith('assets/assets/')) {
+      return 'assets/$raw';
+    }
+    return raw;
   }
 
   void _toggleAutoRotate() {
@@ -169,9 +117,17 @@ class _Product3DViewerState extends State<Product3DViewer> {
     });
   }
 
+  void _toggleSourceMode() {
+    setState(() {
+      _forceLocalAsset = !_forceLocalAsset;
+      _viewerKeySeed++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hasReady3D = !_isPreparingModel && _resolvedSrc != null;
+    final src = _effectiveSrc;
+    final usingLocalAsset = false;
 
     return Container(
       height: widget.height,
@@ -184,216 +140,158 @@ class _Product3DViewerState extends State<Product3DViewer> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. Contenido principal: Cargando / Visor 3D / Fallback 2D
-          if (_isPreparingModel)
-            _LoadingView(
-              posterUrl: widget.posterUrl,
-              productName: widget.productName,
-            )
-          else if (hasReady3D)
-            Padding(
-              padding: const EdgeInsets.all(4.0),
-              child: ModelViewer(
-                key: ValueKey('$_resolvedSrc-$_viewerKeySeed-$_autoRotate'),
-                src: _resolvedSrc!,
-                alt: widget.productName,
-                ar: false,
-                autoRotate: _autoRotate,
-                autoRotateDelay: 0,
-                rotationPerSecond: '25deg',
-                cameraControls: true,
-                disableZoom: false,
-                shadowIntensity: 1.0,
-                shadowSoftness: 0.8,
-                exposure: 1.0,
-                backgroundColor: AppColors.background,
-                loading: Loading.eager,
+          // 1. Visor 3D
+          if (!_webScriptReady)
+            const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: AppColors.accent),
+                  SizedBox(height: 12),
+                  Text(
+                    'Inicializando motor 3D Web...',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
               ),
             )
           else
-            _FallbackView(
-              posterUrl: widget.posterUrl,
-              productName: widget.productName,
-              reason: _errorReason,
+            Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: kIsWeb
+                  ? (buildWebModelViewer(
+                        src: src,
+                        alt: widget.productName,
+                        autoRotate: _autoRotate,
+                        seed: _viewerKeySeed,
+                      ) ??
+                      const SizedBox())
+                  : ModelViewer(
+                      key: ValueKey('$src-$_viewerKeySeed-$_autoRotate'),
+                      src: src,
+                      alt: widget.productName,
+                      ar: false,
+                      autoRotate: _autoRotate,
+                      autoRotateDelay: 0,
+                      rotationPerSecond: '30deg',
+                      cameraControls: true,
+                      disableZoom: false,
+                      shadowIntensity: 1.0,
+                      shadowSoftness: 0.8,
+                      exposure: 1.0,
+                      backgroundColor: AppColors.background,
+                      loading: Loading.eager,
+                    ),
             ),
 
-          // 2. Badge superior izquierdo "VISOR 3D" / "CARGANDO 3D" / "VISTA 2D"
+          // 2. Badge superior izquierdo "VISOR 3D"
           Positioned(
             top: 14,
             left: 14,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: AppColors.textPrimary.withValues(alpha: 0.88),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    hasReady3D
-                        ? Icons.view_in_ar_rounded
-                        : Icons.image_outlined,
-                    color: AppColors.accent,
-                    size: 16,
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _isPreparingModel
-                        ? 'DESCARGANDO 3D...'
-                        : (hasReady3D ? 'VISOR 3D ACTIVO' : 'VISTA 2D (SIN .GLB)'),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.6,
+            child: IgnorePointer(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.textPrimary.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.view_in_ar_rounded,
+                      color: AppColors.accent,
+                      size: 16,
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // 3. Controles superiores derechos (auto-rotar / reiniciar vista)
-          if (hasReady3D)
-            Positioned(
-              top: 12,
-              right: 12,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _ViewerIconButton(
-                    icon: _autoRotate
-                        ? Icons.pause_circle_outline_rounded
-                        : Icons.play_circle_outline_rounded,
-                    tooltip: _autoRotate
-                        ? 'Pausar rotación'
-                        : 'Rotar automáticamente',
-                    onTap: _toggleAutoRotate,
-                  ),
-                  const SizedBox(width: 8),
-                  _ViewerIconButton(
-                    icon: Icons.restart_alt_rounded,
-                    tooltip: 'Restablecer cámara',
-                    onTap: _resetCamera,
-                  ),
-                ],
-              ),
-            ),
-
-          // 4. Indicador inferior "Arrastra para rotar 360°"
-          if (hasReady3D)
-            Positioned(
-              bottom: 14,
-              left: 0,
-              right: 0,
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 7,
+                    const SizedBox(width: 5),
+                    Text(
+                      usingLocalAsset ? '3D LOCAL (GLB)' : '3D CLOUD (GLB)',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.threesixty_rounded,
-                          size: 16,
-                          color: AppColors.accent,
-                        ),
-                        SizedBox(width: 6),
-                        Text(
-                          'Arrastra para rotar 360°',
-                          style: TextStyle(
-                            color: AppColors.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LoadingView extends StatelessWidget {
-  final String? posterUrl;
-  final String productName;
-
-  const _LoadingView({
-    required this.posterUrl,
-    required this.productName,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (posterUrl != null &&
-            posterUrl!.trim().isNotEmpty &&
-            !posterUrl!.contains('...'))
-          Opacity(
-            opacity: 0.35,
-            child: Image.network(
-              posterUrl!.trim(),
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => const SizedBox(),
-            ),
           ),
-        Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
+
+          // 3. Controles superiores derechos (alternar local/nube, auto-rotar, reiniciar vista)
+          Positioned(
+            top: 12,
+            right: 12,
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 3,
-                    color: AppColors.accent,
-                  ),
+                _ViewerIconButton(
+                  icon: _autoRotate
+                      ? Icons.pause_circle_outline_rounded
+                      : Icons.play_circle_outline_rounded,
+                  tooltip: _autoRotate
+                      ? 'Pausar rotación'
+                      : 'Rotar automáticamente',
+                  onTap: _toggleAutoRotate,
                 ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Cargando modelo 3D (.glb)...',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 13,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  productName,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textSecondary,
-                  ),
+                const SizedBox(width: 8),
+                _ViewerIconButton(
+                  icon: Icons.restart_alt_rounded,
+                  tooltip: 'Restablecer cámara',
+                  onTap: _resetCamera,
                 ),
               ],
             ),
           ),
-        ),
-      ],
+
+          // 4. Indicador inferior "Arrastra para rotar 360°"
+          Positioned(
+            bottom: 14,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.threesixty_rounded,
+                        size: 16,
+                        color: AppColors.accent,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'Arrastra para rotar 360°',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -429,102 +327,6 @@ class _ViewerIconButton extends StatelessWidget {
               color: AppColors.textPrimary,
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FallbackView extends StatelessWidget {
-  final String? posterUrl;
-  final String productName;
-  final String? reason;
-
-  const _FallbackView({
-    required this.posterUrl,
-    required this.productName,
-    this.reason,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final hasValidPoster = posterUrl != null &&
-        posterUrl!.trim().isNotEmpty &&
-        !posterUrl!.contains('...');
-
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (hasValidPoster)
-          Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Image.network(
-              posterUrl!.trim(),
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => _emptyPlaceholder(),
-            ),
-          )
-        else
-          _emptyPlaceholder(),
-        if (reason != null)
-          Positioned(
-            bottom: 12,
-            left: 16,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.92),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Text(
-                reason!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _emptyPlaceholder() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.view_in_ar_outlined,
-              size: 56,
-              color: AppColors.textSecondary.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              productName,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Sin archivo .glb válido en esta zapatilla',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 12,
-              ),
-            ),
-          ],
         ),
       ),
     );
