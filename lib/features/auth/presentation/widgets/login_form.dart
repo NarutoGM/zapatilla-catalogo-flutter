@@ -268,23 +268,26 @@ class _LoginFormState extends State<LoginForm> {
                     color: AppColors.textPrimary,
                   ),
                 ),
-                TextButton(
-                  onPressed: isLoading || _sendingPasswordReset
-                      ? null
-                      : _resetPassword,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  child: Text(
-                    _sendingPasswordReset
-                        ? 'Enviando...'
-                        : '¿Olvidaste tu contraseña?',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.primaryLight,
+                Flexible(
+                  child: TextButton(
+                    onPressed: isLoading || _sendingPasswordReset
+                        ? null
+                        : _resetPassword,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      _sendingPasswordReset
+                          ? 'Enviando...'
+                          : '¿Olvidaste tu contraseña?',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primaryLight,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),
@@ -432,17 +435,21 @@ class _LoginFormState extends State<LoginForm> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    GoogleLogo(size: 20),
-                    SizedBox(width: 10),
-                    Text(
-                      'Continuar con Google',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
+                    const GoogleLogo(size: 20),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'Continuar con Google',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
